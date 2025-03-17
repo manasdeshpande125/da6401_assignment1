@@ -87,7 +87,7 @@ Supported weight initialization methods:
 - `random`
 - `xavier`
 
----
+
 
 ---
 
@@ -105,5 +105,7 @@ From experimentation, the best configuration achieved **88.23% validation accura
 For better performance, **data augmentation** can be used to reach **95% accuracy**.
 
 ---
+## Wandb Report Link:
+https://api.wandb.ai/links/manasdeshpande4902-iit-madras/hxjbuexn
 
 
