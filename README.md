@@ -108,4 +108,8 @@ For better performance, **data augmentation** can be used to reach **95% accurac
 ## Wandb Report Link:
 https://api.wandb.ai/links/manasdeshpande4902-iit-madras/hxjbuexn
 
+---
+## Way to run train.py
+python train.py  -we "manasdeshpande4902-iit-madras" -wp "Trial" -o "adam" -lr 0.001 -l "cross_entropy" -e 10 -w_i "xavier" -w_d 0.005 -a "tanh"
+
 
