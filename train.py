@@ -21,12 +21,14 @@ def load(args):
     X_train = np.array(X_train.reshape(X_train.shape[0], 784,1))
     X_test = np.array(X_test.reshape(X_test.shape[0], 784,1))
     X_validation = np.array(X_validation.reshape(X_validation.shape[0], 784,1))
+    if(args.loss=="mean_squared_error"):
+        args.loss="sqauerd_error"
     train(X_train, y_train, X_validation, y_validation,num_inputs_nodes=784,num_hidden_layers=args.num_layers,
                           hidden_layer_size = args.hidden_size,out_num = 10,
                           batch_size = args.batch_size, lr_rate = args.learning_rate,
                           init_type = args.weight_init, op_name = args.optimizer,
                           act_type=args.activation,weight_decay = args.weight_decay,
-                          l_type = args.loss, epochs = args.epochs)
+                          l_type = "cross_entropy", epochs = args.epochs)
 
 
 def layer_init(arr,n1,n2,init_type):
@@ -102,7 +104,6 @@ def one_hot(y, num_output_nodes):
         v[j,i] = 1
     return v
 
-
 def forward(x, W, B, activation_type):
     h = []
     a = []
@@ -118,7 +119,6 @@ def forward(x, W, B, activation_type):
 
 def loss(y,y_hat,l_type,W,reg,n_class):
     if l_type=='cross_entropy':
-        #err=-1*np.sum(np.multiply(one_hot(y,n_class),np.log(y_hat)))/one_hot(y,n_class).shape[1]
         err = -1 * np.sum(np.multiply(one_hot(y, n_class), np.log(np.clip(y_hat, 1e-10, 1.0)))) / one_hot(y, n_class).shape[1]
     elif l_type=='squared_error':
         err=np.sum((one_hot(y,n_class)-y_hat)**2)/(2*one_hot(y,n_class)).shape[1]
@@ -142,9 +142,9 @@ def back_prop(x, y, y_hat, a, h , W, B, batch_size,l_type,act_type):
         grad_h[-1] = -1 * (y / (y_hat + 1e-10))
         grad_a[-1] = -1*(y-y_hat)
     if l_type == "squared_error":
-        grad_h[-1] = -2 * (y - y_hat)  # Correct derivative of squared error loss
-        grad_a[-1] = grad_h[-1] * (y_hat * (1 - y_hat))  # Chain rule for activation function
-
+        grad_h[-1] = -2 * (y - y_hat)
+        grad_a[-1] = grad_h[-1] * (y_hat * (1 - y_hat))
+        
     for i in range(len(W)-1, -1, -1):
         grad_W[i] = np.dot(grad_a[i], h[i].T)
         #grad_B[i] = np.dot(grad_a[i], np.ones((batch_size,1)))
@@ -163,81 +163,51 @@ def sgd_step(W, B, grad_W, grad_B, lr, reg):
     return W, B
 
 
-def momentum_step(w, b, gW, gB, lr, moment, reg):
-    params = {'w': w, 'b': b}
-
-    # Initialize momentum buffers for weights and biases
-    Wmoments = [np.zeros_like(wi) for wi in params['w']]
-    Bmoments = [np.zeros_like(bi) for bi in params['b']]
-
+def momentum_step(w, b, gW, gB, vw, vb, lr, moment, reg):
     # Update momentum buffers
-    Wmoments = [moment * wm + lr * gw for wm, gw in zip(Wmoments, gW)]
-    Bmoments = [moment * bm + lr * gb for bm, gb in zip(Bmoments, gB)]
+    vw = [moment * vwi + lr * gw for vwi, gw in zip(vw, gW)]
+    vb = [moment * vbi + lr * gb for vbi, gb in zip(vb, gB)]
 
     # Update weights and biases
-    W = [(1 - lr * reg) * wi - wm for wi, wm in zip(params['w'], Wmoments)]
-    B = [(1 - lr * reg) * bi - bm for bi, bm in zip(params['b'], Bmoments)]
+    W = [(1-lr * reg) * wi - vwi for wi, vwi in zip(w, vw)]
+    B = [(1-lr * reg) * bi - vbi for bi, vbi in zip(b, vb)]
 
-    return W, B
+    return W, B, vw, vb
 
 
-def RMSprop_step(w, b, gW, gB, lr, beta, epsilon=1e-7,reg=0):
-    params = {'w': w, 'b': b}
-
-    # Initialize moving average of squared gradients
-    vW = [np.zeros_like(wi) for wi in params['w']]
-    vB = [np.zeros_like(bi) for bi in params['b']]
-
+def RMSprop_step(w, b, gW, gB, vW, vB, lr, beta, epsilon=1e-7, reg=0):
     # Update moving averages of squared gradients
     vW = [beta * vw + (1 - beta) * (gw ** 2) for vw, gw in zip(vW, gW)]
     vB = [beta * vb + (1 - beta) * (gb ** 2) for vb, gb in zip(vB, gB)]
 
     # Update parameters
-    W = [wi - (lr / np.sqrt(vw + epsilon)) * gw for wi, vw, gw in zip(params['w'], vW, gW)]
-    B = [bi - (lr / np.sqrt(vb + epsilon)) * gb for bi, vb, gb in zip(params['b'], vB, gB)]
+    W = [(1-lr * reg) * wi - (lr / np.sqrt(vw + epsilon)) * gw for wi, vw, gw in zip(w, vW, gW)]
+    B = [(1-lr * reg) * bi - (lr / np.sqrt(vb + epsilon)) * gb for bi, vb, gb in zip(b, vB, gB)]
 
-    return W, B
+    return W, B, vW, vB
 
-def nesterov_sgd_step(w, b, gW, gB, lr, moment, reg=0):
-    params = {'w': w, 'b': b}
-
-    # Initialize momentum terms
-    Wmoments = [np.zeros_like(wi) for wi in params['w']]
-    Bmoments = [np.zeros_like(bi) for bi in params['b']]
-
+def nesterov_sgd_step(w, b, gW, gB, vw, vb, lr, moment, reg=0):
     # Lookahead step: Apply momentum before computing gradients
-    lookahead_W = [wi - moment * wm for wi, wm in zip(params['w'], Wmoments)]
-    lookahead_B = [bi - moment * bm for bi, bm in zip(params['b'], Bmoments)]
+    lookahead_W = [wi - moment * vwi for wi, vwi in zip(w, vw)]
+    lookahead_B = [bi - moment * vbi for bi, vbi in zip(b, vb)]
 
     # Compute updated momentum
-    Wmoments = [moment * wm + lr * gw for wm, gw in zip(Wmoments, gW)]
-    Bmoments = [moment * bm + lr * gb for bm, gb in zip(Bmoments, gB)]
+    vw = [moment * vwi + lr * gw for vwi, gw in zip(vw, gW)]
+    vb = [moment * vbi + lr * gb for vbi, gb in zip(vb, gB)]
 
     # Apply weight decay regularization and update parameters
-    W = [(1 - lr * reg) * wi - wm for wi, wm in zip(lookahead_W, Wmoments)]
-    B = [(1 - lr * reg) * bi - bm for bi, bm in zip(lookahead_B, Bmoments)]
+    W = [(1-lr * reg) * wi - vwi for wi, vwi in zip(lookahead_W, vw)]
+    B = [(1-lr * reg) * bi - vbi for bi, vbi in zip(lookahead_B, vb)]
 
-    return W, B
+    return W, B, vw, vb
 
 
-def adam_sgd_step(w, b, gW, gB, lr, beta1, beta2, epsilon, reg=0, t=1):
-    params = {'w': w, 'b': b}
-
-    # Initialize moment estimates as lists of zero arrays for each layer
-    Wm = [np.zeros_like(wi) for wi in params['w']]
-    Wv = [np.zeros_like(wi) for wi in params['w']]
-    Bm = [np.zeros_like(bi) for bi in params['b']]
-    Bv = [np.zeros_like(bi) for bi in params['b']]
-
-    # Convert gradients to NumPy arrays
-    gW = [np.array(gi) for gi in gW]
-    gB = [np.array(gi) for gi in gB]
-
-    # Update biased first moment estimate
+def adam_sgd_step(w, b, gW, gB, Wm, Wv, Bm, Bv, lr, beta1, beta2, epsilon, reg=0, t=1):
+    # Update biased first moment estimate (mean of gradients)
     Wm = [beta1 * wm + (1 - beta1) * gw for wm, gw in zip(Wm, gW)]
     Bm = [beta1 * bm + (1 - beta1) * gb for bm, gb in zip(Bm, gB)]
 
-    # Update biased second raw moment estimate
+    # Update biased second raw moment estimate (uncentered variance of gradients)
     Wv = [beta2 * wv + (1 - beta2) * (gw ** 2) for wv, gw in zip(Wv, gW)]
     Bv = [beta2 * bv + (1 - beta2) * (gb ** 2) for bv, gb in zip(Bv, gB)]
 
@@ -247,34 +217,23 @@ def adam_sgd_step(w, b, gW, gB, lr, beta1, beta2, epsilon, reg=0, t=1):
     Bm_hat = [bm / (1 - beta1 ** t) for bm in Bm]
     Bv_hat = [bv / (1 - beta2 ** t) for bv in Bv]
 
-    # Update parameters
-    W = [(1 - lr * reg) * wi - lr * (wm_h / (np.sqrt(wv_h) + epsilon)) for wi, wm_h, wv_h in zip(params['w'], Wm_hat, Wv_hat)]
-    B = [(1 - lr * reg) * bi - lr * (bm_h / (np.sqrt(bv_h) + epsilon)) for bi, bm_h, bv_h in zip(params['b'], Bm_hat, Bv_hat)]
+    # Update parameters using Adam formula
+    W = [(1-lr * reg) * wi - lr * (wm_h / (np.sqrt(wv_h) + epsilon)) for wi, wm_h, wv_h in zip(w, Wm_hat, Wv_hat)]
+    B = [(1-lr * reg) * bi - lr * (bm_h / (np.sqrt(bv_h) + epsilon)) for bi, bm_h, bv_h in zip(b, Bm_hat, Bv_hat)]
 
-    return W, B
+    return W, B, Wm, Wv, Bm, Bv
 
 
-def nadam_sgd_step(w, b, gW, gB, lr, beta1, beta2, epsilon, reg=0, t=1):
-    params = {'w': w, 'b': b}
-
-    # Initialize moment estimates properly
-    Wm = [np.zeros_like(wi) for wi in params['w']]
-    Wv = [np.zeros_like(wi) for wi in params['w']]
-    Bm = [np.zeros_like(bi) for bi in params['b']]
-    Bv = [np.zeros_like(bi) for bi in params['b']]
-
-    # Convert gradients to NumPy arrays
-    gW = [np.array(gi) for gi in gW]
-    gB = [np.array(gi) for gi in gB]
-
-    # Compute lookahead momentum term for Nesterov-like update
+def nadam_sgd_step(w, b, gW, gB, Wm, Wv, Bm, Bv, lr, beta1, beta2, epsilon, reg=0, t=1):
+    # Compute first moment update (momentum)
     Wm = [beta1 * wm + (1 - beta1) * gw for wm, gw in zip(Wm, gW)]
     Bm = [beta1 * bm + (1 - beta1) * gb for bm, gb in zip(Bm, gB)]
 
+    # Compute Nesterov lookahead correction for first moment
     Wm_nesterov = [beta1 * wm + (1 - beta1) * gw for wm, gw in zip(Wm, gW)]
     Bm_nesterov = [beta1 * bm + (1 - beta1) * gb for bm, gb in zip(Bm, gB)]
 
-    # Update biased second raw moment estimate
+    # Compute second moment update (uncentered variance of gradients)
     Wv = [beta2 * wv + (1 - beta2) * (gw ** 2) for wv, gw in zip(Wv, gW)]
     Bv = [beta2 * bv + (1 - beta2) * (gb ** 2) for bv, gb in zip(Bv, gB)]
 
@@ -284,18 +243,33 @@ def nadam_sgd_step(w, b, gW, gB, lr, beta1, beta2, epsilon, reg=0, t=1):
     Bm_hat = [bm_n / (1 - beta1 ** t) for bm_n in Bm_nesterov]
     Bv_hat = [bv / (1 - beta2 ** t) for bv in Bv]
 
-    # Update parameters
-    W = [(1 - lr * reg) * wi - lr * (wm_h / (np.sqrt(wv_h) + epsilon)) for wi, wm_h, wv_h in zip(params['w'], Wm_hat, Wv_hat)]
-    B = [(1 - lr * reg) * bi - lr * (bm_h / (np.sqrt(bv_h) + epsilon)) for bi, bm_h, bv_h in zip(params['b'], Bm_hat, Bv_hat)]
+    # Update parameters using Nadam formula
+    W = [(1-lr * reg) * wi - lr * (wm_h / (np.sqrt(wv_h) + epsilon)) for wi, wm_h, wv_h in zip(w, Wm_hat, Wv_hat)]
+    B = [(1-lr * reg) * bi - lr * (bm_h / (np.sqrt(bv_h) + epsilon)) for bi, bm_h, bv_h in zip(b, Bm_hat, Bv_hat)]
 
-    return W, B
+    return W, B, Wm, Wv, Bm, Bv
+
 
 
 def train(X_train, y_train, x_val, y_val, num_inputs_nodes, num_hidden_layers, hidden_layer_size, out_num, init_type, epochs,
-          batch_size, l_type, act_type, op_name, lr_rate, m=0.5,weight_decay=0, beta=0.5, beta1=0.5, beta2=0.5, epsilon=0.000001):
+          batch_size, l_type, act_type, op_name, lr_rate, m=0.5, weight_decay=0.0005, beta=0.5, beta1=0.9, beta2=0.999, epsilon=1e-7):
 
     # Initialize weights and biases dynamically
     W, B = param(num_inputs_nodes, num_hidden_layers, hidden_layer_size, out_num, init_type)
+
+    # Initialize velocity terms for momentum-based optimizers
+    vw = [np.zeros_like(wi) for wi in W]
+    vb = [np.zeros_like(bi) for bi in B]
+
+    # Initialize squared gradient accumulators for RMSprop-based optimizers
+    vW = [np.zeros_like(wi) for wi in W]
+    vB = [np.zeros_like(bi) for bi in B]
+
+    # Initialize first and second moment estimates for Adam/Nadam
+    Wm = [np.zeros_like(wi) for wi in W]
+    Wv = [np.zeros_like(wi) for wi in W]
+    Bm = [np.zeros_like(bi) for bi in B]
+    Bv = [np.zeros_like(bi) for bi in B]
 
     N = X_train.shape[0]
     n_batches = int(np.floor(N / batch_size))
@@ -318,24 +292,26 @@ def train(X_train, y_train, x_val, y_val, num_inputs_nodes, num_hidden_layers, h
             if op_name == 'sgd':
                 W, B = sgd_step(W, B, grad_W, grad_B, lr_rate, weight_decay)
             elif op_name == 'momentum':
-                W, B = momentum_step(W, B, grad_W, grad_B, lr_rate, m, weight_decay)
+                W, B, vw, vb = momentum_step(W, B, grad_W, grad_B, vw, vb, lr_rate, m, weight_decay)
             elif op_name == 'rmsprop':
-                W, B = RMSprop_step(W, B, grad_W, grad_B, lr_rate, beta=beta, reg=weight_decay)
+                W, B, vW, vB = RMSprop_step(W, B, grad_W, grad_B, vW, vB, lr_rate, beta, epsilon, weight_decay)
             elif op_name == "nesterov":
-                W, B = nesterov_sgd_step(W, B, grad_W, grad_B, lr_rate, m, weight_decay)
+                W, B, vw, vb = nesterov_sgd_step(W, B, grad_W, grad_B, vw, vb, lr_rate, m, weight_decay)
             elif op_name == "adam":
-                W, B = adam_sgd_step(W, B, grad_W, grad_B, lr=lr_rate, beta1=beta1, beta2=beta2, epsilon=epsilon, reg=weight_decay,t=steps)
+                W, B, Wm, Wv, Bm, Bv = adam_sgd_step(W, B, grad_W, grad_B, Wm, Wv, Bm, Bv, lr=lr_rate, beta1=beta1, beta2=beta2, epsilon=epsilon, reg=weight_decay, t=steps)
             elif op_name == "nadam":
-                W, B = nadam_sgd_step(W, B, grad_W, grad_B, lr=lr_rate, beta1=beta1, beta2=beta2, epsilon=epsilon, reg=weight_decay,t=steps)
+                W, B, Wm, Wv, Bm, Bv = nadam_sgd_step(W, B, grad_W, grad_B, Wm, Wv, Bm, Bv, lr=lr_rate, beta1=beta1, beta2=beta2, epsilon=epsilon, reg=weight_decay, t=steps)
 
             l += loss(y_train[ds:ds + mini_batch_size], y_hat, l_type, W, weight_decay, out_num)
             acc += eval_acc(y_hat, y_train[ds:ds + mini_batch_size])
             steps += 1
             ds += batch_size
 
+        # Normalize
         l /= (n_batches + mini_batch_size)
         acc /= steps
 
+        # Save loss and accuracy history
         train_loss.append(l)
         train_accuracy.append(acc)
 
@@ -353,7 +329,6 @@ def train(X_train, y_train, x_val, y_val, num_inputs_nodes, num_hidden_layers, h
 
 
 
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
@@ -364,14 +339,14 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size","-b",help="Batch size used to train neural network", type =int, default=32)
     parser.add_argument("--optimizer","-o",help="batch size is used to train neural network", default= "adam", choices=["sgd","momentum","nag","rmsprop","adam","nadam"])
     parser.add_argument("--loss","-l", default= "cross_entropy", choices=["mean_squared_error", "cross_entropy"])
-    parser.add_argument("--learning_rate","-lr", default=0.1, type=float)
+    parser.add_argument("--learning_rate","-lr", default=0.01, type=float)
     parser.add_argument("--momentum","-m", default=0.5,type=float)
     parser.add_argument("--beta","-beta", default=0.5, type=float)
-    parser.add_argument("--beta1","-beta1", default=0.5,type=float)
-    parser.add_argument("--beta2","-beta2", default=0.5,type=float)
-    parser.add_argument("--epsilon","-eps",type=float, default = 0.000001)
+    parser.add_argument("--beta1","-beta1", default=0.9,type=float)
+    parser.add_argument("--beta2","-beta2", default=0.999,type=float)
+    parser.add_argument("--epsilon","-eps",type=float, default = 0.0000001)
     parser.add_argument("--weight_decay","-w_d", default=0.005,type=float)
-    parser.add_argument("-w","--weight_init", default="xavier",choices=["random","xavier"])
+    parser.add_argument("-w_i","--weight_init", default="xavier",choices=["random","xavier"])
     parser.add_argument("--num_layers","-nhl",type=int, default=4)
     parser.add_argument("--hidden_size","-sz",type=int, default=64)
     parser.add_argument("-a","--activation",choices=["identity","sigmoid","tanh","relu"], default="ReLU")
