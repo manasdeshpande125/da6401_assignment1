@@ -18,6 +18,7 @@ Ensure you have Python 3 installed, then install dependencies:
 ```bash
 pip install numpy matplotlib wandb
 ```
+Also I have imported datasets from keras.datasets
 
 ---
 
@@ -53,7 +54,7 @@ train(inputSize, hiddenLayers, outputSize, sizeOfHiddenLayers, batchSize, learni
 
 ### **Example Usage:**
 ```python
-train(inputSize=784, hiddenLayers=5, outputSize=10, sizeOfHiddenLayers=[64, 64, 64, 64, 64],
+train(inputSize=784, hiddenLayers=4, outputSize=10, sizeOfHiddenLayers=64,
       batchSize=32, learningRate=0.001, initialisationType="xavier", optimiser="nadam",
       epochs=10, activationFunc="relu", weightDecay=0.0001, lossFunc="cross_entropy",
       dataset="fashion_mnist", beta=0.9, beta1=0.9, beta2=0.999, epsilon=1e-8)
@@ -88,18 +89,10 @@ Supported weight initialization methods:
 
 ---
 
-## Evaluating the Model
-After training, evaluate the model on the test dataset:
-```python
-y_pred = predict(X_test, trained_weights, trained_biases)
-accuracy = evaluate_accuracy(y_pred, y_test)
-print(f"Test Accuracy: {accuracy:.2f}%")
-```
-
 ---
 
 ## Best Observations
-From experimentation, the best configuration achieved **87.727% validation accuracy**:
+From experimentation, the best configuration achieved **88.23% validation accuracy**:
 - **Epochs:** 10
 - **Hidden Layers:** 4 (each with 64 neurons)
 - **Learning Rate:** 0.001
